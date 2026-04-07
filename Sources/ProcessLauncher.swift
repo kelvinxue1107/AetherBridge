@@ -21,7 +21,7 @@ class ProcessLauncher: ObservableObject {
     
     func launchAntigravitySecurely() {
         isLaunching = true
-        statusMessage = "Setting up secure clone..."
+        statusMessage = "Setting up..."
         
         let sourcePath = "/Applications/Antigravity.app"
         
@@ -31,10 +31,10 @@ class ProcessLauncher: ObservableObject {
             return
         }
         
-        // Capture values for the background task
+        // Capture port for background work
         let port = self.proxyPort
         
-        Task.detached { [weak self] in
+        Task.detached {
             do {
                 let fm = FileManager.default
                 let supportDir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -43,7 +43,7 @@ class ProcessLauncher: ObservableObject {
                 
                 let destApp = supportDir.appendingPathComponent("Antigravity.app")
                 
-                // Compare modification dates to decide whether to re-clone
+                // Check if we need to re-clone
                 let sourceAttrs = try fm.attributesOfItem(atPath: sourcePath)
                 let sourceDate = sourceAttrs[.modificationDate] as? Date ?? Date.distantPast
                 
@@ -59,10 +59,10 @@ class ProcessLauncher: ObservableObject {
                 }
                 
                 if needsCopy {
-                    await MainActor.run { self?.statusMessage = "Cloning IDE (~30s first time)..." }
+                    await MainActor.run { self.statusMessage = "Cloning IDE (~30s first time)..." }
                     try fm.copyItem(atPath: sourcePath, toPath: destApp.path)
                     
-                    await MainActor.run { self?.statusMessage = "Deep-stripping signatures (~20s)..." }
+                    await MainActor.run { self.statusMessage = "Stripping signatures (~20s)..." }
                     let stripTask = Process()
                     stripTask.executableURL = URL(fileURLWithPath: "/bin/bash")
                     stripTask.arguments = [
@@ -73,32 +73,6 @@ class ProcessLauncher: ObservableObject {
                     stripTask.waitUntilExit()
                 }
                 
-                await MainActor.run { self?.statusMessage = "Writing proxychains config..." }
-                
-                // Write proxychains.conf (no leading whitespace!)
-                let confPath = supportDir.appendingPathComponent("proxychains.conf")
-                let confLines = [
-                    "strict_chain",
-                    "proxy_dns",
-                    "remote_dns_subnet 198",
-                    "tcp_read_time_out 1500000",
-                    "tcp_connect_time_out 15000",
-                    "quiet_mode",
-                    "[ProxyList]",
-                    "socks5 127.0.0.1 \(port)"
-                ]
-                let confContent = confLines.joined(separator: "\n") + "\n"
-                try confContent.write(to: confPath, atomically: true, encoding: .utf8)
-                
-                // Locate the bundled proxychains4 binary and dylib
-                guard let bundleResourceURL = Bundle.main.resourceURL else {
-                    throw NSError(domain: "AetherBridge", code: 1,
-                                  userInfo: [NSLocalizedDescriptionKey: "Failed to find app Resources"])
-                }
-                
-                let pc4Path = bundleResourceURL.appendingPathComponent("proxychains4").path
-                let dylibPath = bundleResourceURL.appendingPathComponent("libproxychains4.dylib").path
-                
                 let electronPath = destApp.appendingPathComponent("Contents/MacOS/Electron").path
                 
                 if !fm.fileExists(atPath: electronPath) {
@@ -106,60 +80,48 @@ class ProcessLauncher: ObservableObject {
                                   userInfo: [NSLocalizedDescriptionKey: "Electron binary not found in clone"])
                 }
                 
-                await MainActor.run { self?.statusMessage = "Launching via proxychains..." }
+                await MainActor.run { self.statusMessage = "Launching Antigravity..." }
                 
-                if fm.fileExists(atPath: pc4Path) {
-                    // Preferred: Use proxychains4 binary as wrapper
-                    let process = Process()
-                    process.executableURL = URL(fileURLWithPath: pc4Path)
-                    process.arguments = ["-f", confPath.path, electronPath]
-                    
-                    var env = ProcessInfo.processInfo.environment
-                    env["PROXYCHAINS_CONF_FILE"] = confPath.path
-                    // Remove any system proxy settings that could conflict
-                    env.removeValue(forKey: "http_proxy")
-                    env.removeValue(forKey: "https_proxy")
-                    env.removeValue(forKey: "HTTP_PROXY")
-                    env.removeValue(forKey: "HTTPS_PROXY")
-                    env.removeValue(forKey: "ALL_PROXY")
-                    process.environment = env
-                    
-                    try process.run()
-                    
-                    await MainActor.run {
-                        self?.statusMessage = "✅ Launched via proxychains4 wrapper!"
-                        self?.isLaunching = false
-                    }
-                } else if fm.fileExists(atPath: dylibPath) {
-                    // Fallback: Use DYLD_INSERT_LIBRARIES directly
-                    let process = Process()
-                    process.executableURL = URL(fileURLWithPath: electronPath)
-                    
-                    var env = ProcessInfo.processInfo.environment
-                    env["DYLD_INSERT_LIBRARIES"] = dylibPath
-                    env["PROXYCHAINS_CONF_FILE"] = confPath.path
-                    env.removeValue(forKey: "http_proxy")
-                    env.removeValue(forKey: "https_proxy")
-                    env.removeValue(forKey: "HTTP_PROXY")
-                    env.removeValue(forKey: "HTTPS_PROXY")
-                    env.removeValue(forKey: "ALL_PROXY")
-                    process.environment = env
-                    
-                    try process.run()
-                    
-                    await MainActor.run {
-                        self?.statusMessage = "✅ Launched via DYLD injection!"
-                        self?.isLaunching = false
-                    }
-                } else {
-                    throw NSError(domain: "AetherBridge", code: 2,
-                                  userInfo: [NSLocalizedDescriptionKey: "Neither proxychains4 nor dylib found in bundle!"])
+                // Launch the stripped Electron with Chromium proxy flags + Node.js env vars
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: electronPath)
+                
+                // Chromium flags: force ALL network through SOCKS5 proxy
+                process.arguments = [
+                    "--proxy-server=socks5://127.0.0.1:\(port)",
+                    "--disable-quic"
+                ]
+                
+                // Environment: catch Node.js/gRPC traffic that bypasses Chromium net stack
+                var env = ProcessInfo.processInfo.environment
+                let httpProxy = "http://127.0.0.1:\(port)"
+                let socksProxy = "socks5://127.0.0.1:\(port)"
+                env["HTTP_PROXY"] = httpProxy
+                env["HTTPS_PROXY"] = httpProxy
+                env["ALL_PROXY"] = socksProxy
+                env["http_proxy"] = httpProxy
+                env["https_proxy"] = httpProxy
+                env["all_proxy"] = socksProxy
+                env["GLOBAL_AGENT_HTTP_PROXY"] = httpProxy
+                env["GLOBAL_AGENT_HTTPS_PROXY"] = httpProxy
+                env["GLOBAL_AGENT_NO_PROXY"] = "localhost,127.0.0.1,::1"
+                env["NO_PROXY"] = "localhost,127.0.0.1,::1"
+                env["no_proxy"] = "localhost,127.0.0.1,::1"
+                env["grpc_proxy"] = httpProxy
+                env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"
+                process.environment = env
+                
+                try process.run()
+                
+                await MainActor.run {
+                    self.statusMessage = "✅ Antigravity launched with proxy on port \(port)!"
+                    self.isLaunching = false
                 }
                 
             } catch {
                 await MainActor.run {
-                    self?.statusMessage = "❌ Error: \(error.localizedDescription)"
-                    self?.isLaunching = false
+                    self.statusMessage = "❌ Error: \(error.localizedDescription)"
+                    self.isLaunching = false
                 }
             }
         }
