@@ -20,11 +20,12 @@ class ProcessLauncher: ObservableObject {
     
     func launchAntigravitySecurely() {
         self.isLaunching = true
-        self.statusMessage = "Launching..."
+        self.statusMessage = "Setting up secure clone..."
         
-        let appURL = URL(fileURLWithPath: "/Applications/Antigravity.app")
+        let fm = FileManager.default
+        let sourcePath = "/Applications/Antigravity.app"
         
-        if !FileManager.default.fileExists(atPath: appURL.path) {
+        if !fm.fileExists(atPath: sourcePath) {
             DispatchQueue.main.async {
                 self.statusMessage = "❌ Antigravity not found at /Applications/"
                 self.isLaunching = false
@@ -32,36 +33,97 @@ class ProcessLauncher: ObservableObject {
             return
         }
         
-        let config = NSWorkspace.OpenConfiguration()
-        var env = ProcessInfo.processInfo.environment
-        let httpProxy = "http://127.0.0.1:\(self.proxyPort)"
-        let socksProxy = "socks5://127.0.0.1:\(self.proxyPort)"
-        
-        // Comprehensive Node.js and gRPC proxy environment variables
-        env["HTTP_PROXY"] = httpProxy
-        env["HTTPS_PROXY"] = httpProxy
-        env["ALL_PROXY"] = socksProxy
-        env["NO_PROXY"] = "localhost,127.0.0.1,::1"
-        env["GLOBAL_AGENT_HTTP_PROXY"] = httpProxy
-        env["GLOBAL_AGENT_HTTPS_PROXY"] = httpProxy
-        env["grpc_proxy"] = httpProxy
-        
-        config.environment = env
-        
-        // Pass Chromium proxy flags directly to the Electron executable
-        config.arguments = [
-            "--proxy-server=\(socksProxy)",
-            "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"
-        ]
-        
-        NSWorkspace.shared.openApplication(at: appURL, configuration: config) { app, error in
-            DispatchQueue.main.async {
-                if let error = error {
-                    self.statusMessage = "❌ Error: \(error.localizedDescription)"
-                } else {
-                    self.statusMessage = "✅ Launched with Electron proxies!"
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let supportDir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("AetherBridge")
+                try fm.createDirectory(at: supportDir, withIntermediateDirectories: true, attributes: nil)
+                
+                let destApp = supportDir.appendingPathComponent("Antigravity.app")
+                
+                // Compare modification dates
+                let sourceAttrs = try fm.attributesOfItem(atPath: sourcePath)
+                let sourceDate = sourceAttrs[.modificationDate] as? Date ?? Date.distantPast
+                
+                var needsCopy = true
+                if fm.fileExists(atPath: destApp.path) {
+                    let destAttrs = try fm.attributesOfItem(atPath: destApp.path)
+                    let destDate = destAttrs[.modificationDate] as? Date ?? Date.distantPast
+                    if destDate >= sourceDate {
+                        needsCopy = false
+                    } else {
+                        try fm.removeItem(at: destApp)
+                    }
                 }
-                self.isLaunching = false
+                
+                if needsCopy {
+                    DispatchQueue.main.async { self.statusMessage = "Cloning IDE..." }
+                    try fm.copyItem(atPath: sourcePath, toPath: destApp.path)
+                    
+                    DispatchQueue.main.async { self.statusMessage = "Stripping signatures..." }
+                    // Strip the signature
+                    let stripTask = Process()
+                    stripTask.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+                    stripTask.arguments = ["--remove-signature", destApp.path]
+                    try stripTask.run()
+                    stripTask.waitUntilExit()
+                }
+                
+                DispatchQueue.main.async { self.statusMessage = "Configuring proxychains..." }
+                // Create proxychains.conf
+                let confPath = supportDir.appendingPathComponent("proxychains.conf")
+                let confContent = """
+                strict_chain
+                proxy_dns
+                remote_dns_subnet 224
+                tcp_read_time_out 15000
+                tcp_connect_time_out 8000
+                [ProxyList]
+                socks5 127.0.0.1 \(self.proxyPort)
+                """
+                try confContent.write(to: confPath, atomically: true, encoding: .utf8)
+                
+                // Locate libproxychains4.dylib
+                guard let bundleResourceURL = Bundle.main.resourceURL else {
+                    throw NSError(domain: "AetherBridge", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to find Resources"])
+                }
+                let dylibPath = bundleResourceURL.appendingPathComponent("libproxychains4.dylib").path
+                
+                if !fm.fileExists(atPath: dylibPath) {
+                    throw NSError(domain: "AetherBridge", code: 2, userInfo: [NSLocalizedDescriptionKey: "libproxychains4.dylib not bundled!"])
+                }
+                
+                // We use process to launch with DYLD_INSERT_LIBRARIES
+                // NSWorkspace doesn't cleanly pass DYLD env vars on some newer macOS versions due to SIP
+                // But since the app is stripped, Process() handles it flawlessly
+                let executablePath = destApp.appendingPathComponent("Contents/MacOS/Electron").path
+                
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: executablePath)
+                
+                var env = ProcessInfo.processInfo.environment
+                env["DYLD_INSERT_LIBRARIES"] = dylibPath
+                env["PROXYCHAINS_CONF_FILE"] = confPath.path
+                // Also retain Chromium hooks for good measure
+                let socksProxy = "socks5://127.0.0.1:\(self.proxyPort)"
+                env["HTTP_PROXY"] = "http://127.0.0.1:\(self.proxyPort)"
+                process.environment = env
+                process.arguments = [
+                    "--proxy-server=\(socksProxy)",
+                    "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"
+                ]
+                
+                try process.run()
+                
+                DispatchQueue.main.async {
+                    self.statusMessage = "✅ Launched via Proxychains DYLD Hook!"
+                    self.isLaunching = false
+                }
+                
+            } catch {
+                DispatchQueue.main.async {
+                    self.statusMessage = "❌ Error: \(error.localizedDescription)"
+                    self.isLaunching = false
+                }
             }
         }
     }
