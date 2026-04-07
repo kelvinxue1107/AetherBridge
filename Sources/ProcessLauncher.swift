@@ -34,18 +34,32 @@ class ProcessLauncher: ObservableObject {
         
         let config = NSWorkspace.OpenConfiguration()
         var env = ProcessInfo.processInfo.environment
-        env["HTTP_PROXY"] = "http://127.0.0.1:\(self.proxyPort)"
-        env["HTTPS_PROXY"] = "http://127.0.0.1:\(self.proxyPort)"
-        env["ALL_PROXY"] = "socks5://127.0.0.1:\(self.proxyPort)"
+        let httpProxy = "http://127.0.0.1:\(self.proxyPort)"
+        let socksProxy = "socks5://127.0.0.1:\(self.proxyPort)"
+        
+        // Comprehensive Node.js and gRPC proxy environment variables
+        env["HTTP_PROXY"] = httpProxy
+        env["HTTPS_PROXY"] = httpProxy
+        env["ALL_PROXY"] = socksProxy
         env["NO_PROXY"] = "localhost,127.0.0.1,::1"
+        env["GLOBAL_AGENT_HTTP_PROXY"] = httpProxy
+        env["GLOBAL_AGENT_HTTPS_PROXY"] = httpProxy
+        env["grpc_proxy"] = httpProxy
+        
         config.environment = env
+        
+        // Pass Chromium proxy flags directly to the Electron executable
+        config.arguments = [
+            "--proxy-server=\(socksProxy)",
+            "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"
+        ]
         
         NSWorkspace.shared.openApplication(at: appURL, configuration: config) { app, error in
             DispatchQueue.main.async {
                 if let error = error {
                     self.statusMessage = "❌ Error: \(error.localizedDescription)"
                 } else {
-                    self.statusMessage = "✅ Launched securely via NSWorkspace!"
+                    self.statusMessage = "✅ Launched with Electron proxies!"
                 }
                 self.isLaunching = false
             }
