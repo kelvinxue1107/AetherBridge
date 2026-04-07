@@ -80,6 +80,7 @@ class ProcessLauncher: ObservableObject {
                 remote_dns_subnet 224
                 tcp_read_time_out 15000
                 tcp_connect_time_out 8000
+                quiet_mode
                 [ProxyList]
                 socks5 127.0.0.1 \(self.proxyPort)
                 """
@@ -112,7 +113,8 @@ class ProcessLauncher: ObservableObject {
                 process.environment = env
                 process.arguments = [
                     "--proxy-server=\(socksProxy)",
-                    "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"
+                    "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1",
+                    "--disable-quic"
                 ]
                 
                 try process.run()
