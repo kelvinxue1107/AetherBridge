@@ -1,18 +1,3 @@
-#!/bin/bash
-echo "Building AetherBridge..."
-swift build -c release
-
-echo "Creating minimal macOS App Bundle..."
-mkdir -p AetherBridge.app/Contents/MacOS
-mkdir -p AetherBridge.app/Contents/Resources
-
-cp .build/apple/Products/Release/AetherBridge AetherBridge.app/Contents/MacOS/ 2>/dev/null || cp .build/release/AetherBridge AetherBridge.app/Contents/MacOS/
-
-if [ -f "AppIcon.icns" ]; then
-    cp AppIcon.icns AetherBridge.app/Contents/Resources/
-fi
-
-cat <<EOF > AetherBridge.app/Contents/Info.plist
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -36,6 +21,3 @@ cat <<EOF > AetherBridge.app/Contents/Info.plist
     <true/>
 </dict>
 </plist>
-EOF
-
-echo "Done! You can now run AetherBridge.app"

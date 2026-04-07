@@ -5,23 +5,36 @@ import AppKit
 struct AetherBridgeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
-    @StateObject private var configManager = IDEConfigManager()
+    @StateObject private var launcher = ProcessLauncher()
 
     var body: some Scene {
         MenuBarExtra("AetherBridge", systemImage: "link.icloud") {
             VStack(alignment: .leading, spacing: 8) {
-                Text("AetherBridge")
+                Text("AetherBridge Launcher")
                     .font(.headline)
                 
                 HStack {
-                    Text("Proxy Port:")
-                    TextField("eg. 10808", text: $configManager.proxyPort)
+                    Text("VLESS Port:")
+                    TextField("10808", text: $launcher.proxyPort)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
                         .frame(width: 80)
                 }
                 
-                Toggle("Enable IDE Proxy", isOn: $configManager.isProxyEnabled)
-                    .toggleStyle(SwitchToggleStyle())
+                Button(action: {
+                    launcher.launchAntigravitySecurely()
+                }) {
+                    HStack {
+                        Image(systemName: "play.fill")
+                        Text("Launch Antigravity Securely")
+                    }
+                }
+                .disabled(launcher.isLaunching)
+                
+                if !launcher.statusMessage.isEmpty {
+                    Text(launcher.statusMessage)
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
                 
                 Divider()
                 
