@@ -1,20 +1,19 @@
-# AetherBridge ✨
+# AetherBridge ✨ (Seamless Launcher Edition)
 
-**AetherBridge** is a native macOS Menu Bar utility designed specifically for developers using the **Google Antigravity IDE** in regions with restricted network access. 
+**AetherBridge** is a native macOS Menu Bar launcher designed specifically for developers using the **Google Antigravity IDE** in regions with restricted network access. 
 
-It acts as a configuration bridge that seamlessly routes *only* your Antigravity IDE traffic through your existing local VLESS/V2Ray proxies (like v2rayU or ClashX) without forcing your entire Mac into a system-wide TUN routing mode.
+It acts as a secure proxy wrapper that automatically binds the Antigravity IDE traffic to your local VLESS/V2Ray proxies without requiring the system-wide TUN mode, and completely bypassing the need for complex DYLD Hooking or Terminal launches.
 
 ---
 
 ## 📥 Installation
 
-1. **Download the Release:** Go to the [Releases page](https://github.com/kelvinxue1107/AetherBridge/releases) and download the latest `AetherBridge-v1.0.zip`.
+1. **Download the Release:** Go to the [Releases page](https://github.com/kelvinxue1107/AetherBridge/releases) and download the `AetherBridge-v2.0.zip`.
 2. **Extract the App:** Double-click the `.zip` file to extract `AetherBridge.app`.
 3. **Move to Applications:** Drag `AetherBridge.app` into your macOS `Applications` folder.
 4. **First Launch:** 
-   *(Note: Because this app is not signed with an Apple Developer ID yet, macOS Gatekeeper might block it initially.)*
    - Right-click (or Control-click) on `AetherBridge.app` and select **Open**. 
-   - A warning will appear. Click **Open** again to bypass Gatekeeper.
+   - Click **Open** again to bypass macOS Gatekeeper.
 
 *(AetherBridge runs purely in your Menu Bar at the top right of your screen and has no Dock icon.)*
 
@@ -27,12 +26,13 @@ You must have a proxy application (e.g., v2rayU, ClashX, or Shadowrocket for Mac
 
 ### Step-by-Step Usage
 
+Instead of opening the Antigravity IDE directly from your Dock, you will use AetherBridge as your secure Launcher!
+
 1. **Locate the Icon:** Click the `link.icloud` icon in your macOS Menu Bar.
-2. **Enter Proxy Port:** In the text field labeled **Proxy Port**, type the exact local port your proxy software uses (for example: `10808`).
-3. **Toggle the Switch:** Click the **Enable IDE Proxy** switch so it turns blue.
-   - *What happens under the hood:* AetherBridge safely injects the local proxy settings directly into the Antigravity IDE's `settings.json` file.
-4. **Work Securely:** Open the Google Antigravity IDE. All its API requests will now route through your proxy seamlessly, while Safari and the rest of your Mac use the standard network!
-5. **Disable when done:** If you want to disable the forwarding, simply toggle the switch off.
+2. **Enter Proxy Port:** In the text field labeled **VLESS Port**, type the exact local port your proxy software uses (for example: `10808`).
+3. **Launch Securely:** Click the **Launch Antigravity Securely** button.
+   - *What happens under the hood:* AetherBridge dynamically bounds standard networking environment variables (`HTTP_PROXY`, `ALL_PROXY`, etc.) targeting your local VLESS port, and launches the native Antigravity IDE application cleanly in the background.
+4. **Work Securely:** The Google Antigravity IDE will open normally! All its internal API requests will securely route through your proxy, while Safari and the rest of your Mac use the standard network!
 
 ---
 
@@ -40,10 +40,11 @@ You must have a proxy application (e.g., v2rayU, ClashX, or Shadowrocket for Mac
 
 If you prefer to compile AetherBridge yourself:
 
-1. Clone this repository:
+1. Clone this repository and checkout the launcher branch:
    ```bash
    git clone https://github.com/kelvinxue1107/AetherBridge.git
    cd AetherBridge
+   git checkout dev/seamless-launcher
    ```
 2. Run the packaging script:
    ```bash
