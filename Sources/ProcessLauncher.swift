@@ -31,7 +31,6 @@ class ProcessLauncher: ObservableObject {
             return
         }
         
-        // Capture port for background work
         let port = self.proxyPort
         
         Task.detached {
@@ -43,7 +42,6 @@ class ProcessLauncher: ObservableObject {
                 
                 let destApp = supportDir.appendingPathComponent("Antigravity.app")
                 
-                // Check if we need to re-clone
                 let sourceAttrs = try fm.attributesOfItem(atPath: sourcePath)
                 let sourceDate = sourceAttrs[.modificationDate] as? Date ?? Date.distantPast
                 
@@ -73,45 +71,68 @@ class ProcessLauncher: ObservableObject {
                     stripTask.waitUntilExit()
                 }
                 
-                let electronPath = destApp.appendingPathComponent("Contents/MacOS/Electron").path
-                
-                if !fm.fileExists(atPath: electronPath) {
-                    throw NSError(domain: "AetherBridge", code: 3,
-                                  userInfo: [NSLocalizedDescriptionKey: "Electron binary not found in clone"])
-                }
-                
+                // Write a helper shell script that launches the app with environment
+                // Using 'open' command ensures the .app bundle is loaded correctly
                 await MainActor.run { self.statusMessage = "Launching Antigravity..." }
                 
-                // Launch the stripped Electron with Chromium proxy flags + Node.js env vars
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: electronPath)
-                
-                // Chromium flags: force ALL network through SOCKS5 proxy
-                process.arguments = [
-                    "--proxy-server=socks5://127.0.0.1:\(port)",
-                    "--disable-quic"
-                ]
-                
-                // Environment: catch Node.js/gRPC traffic that bypasses Chromium net stack
-                var env = ProcessInfo.processInfo.environment
                 let httpProxy = "http://127.0.0.1:\(port)"
                 let socksProxy = "socks5://127.0.0.1:\(port)"
-                env["HTTP_PROXY"] = httpProxy
-                env["HTTPS_PROXY"] = httpProxy
-                env["ALL_PROXY"] = socksProxy
-                env["http_proxy"] = httpProxy
-                env["https_proxy"] = httpProxy
-                env["all_proxy"] = socksProxy
-                env["GLOBAL_AGENT_HTTP_PROXY"] = httpProxy
-                env["GLOBAL_AGENT_HTTPS_PROXY"] = httpProxy
-                env["GLOBAL_AGENT_NO_PROXY"] = "localhost,127.0.0.1,::1"
-                env["NO_PROXY"] = "localhost,127.0.0.1,::1"
-                env["no_proxy"] = "localhost,127.0.0.1,::1"
-                env["grpc_proxy"] = httpProxy
-                env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"
-                process.environment = env
+                let launchScript = supportDir.appendingPathComponent("launch.sh")
+                
+                let scriptContent = """
+                #!/bin/bash
+                export HTTP_PROXY="\(httpProxy)"
+                export HTTPS_PROXY="\(httpProxy)"
+                export ALL_PROXY="\(socksProxy)"
+                export http_proxy="\(httpProxy)"
+                export https_proxy="\(httpProxy)"
+                export all_proxy="\(socksProxy)"
+                export GLOBAL_AGENT_HTTP_PROXY="\(httpProxy)"
+                export GLOBAL_AGENT_HTTPS_PROXY="\(httpProxy)"
+                export GLOBAL_AGENT_NO_PROXY="localhost,127.0.0.1,::1"
+                export NO_PROXY="localhost,127.0.0.1,::1"
+                export no_proxy="localhost,127.0.0.1,::1"
+                export grpc_proxy="\(httpProxy)"
+                export NODE_TLS_REJECT_UNAUTHORIZED="0"
+                
+                # Launch Electron directly from correct working directory
+                cd "\(destApp.appendingPathComponent("Contents/MacOS").path)"
+                exec ./Electron \\
+                    --proxy-server="http://127.0.0.1:\(port)" \\
+                    --disable-quic \\
+                    "$@"
+                """
+                
+                try scriptContent.write(to: launchScript, atomically: true, encoding: .utf8)
+                
+                // Make executable
+                let chmodTask = Process()
+                chmodTask.executableURL = URL(fileURLWithPath: "/bin/chmod")
+                chmodTask.arguments = ["+x", launchScript.path]
+                try chmodTask.run()
+                chmodTask.waitUntilExit()
+                
+                // Launch the script
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/bin/bash")
+                process.arguments = [launchScript.path]
+                
+                // Capture stderr for debugging
+                let errPipe = Pipe()
+                process.standardError = errPipe
                 
                 try process.run()
+                
+                // Read first few seconds of stderr for any crash info
+                DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+                    let errData = errPipe.fileHandleForReading.availableData
+                    if let errStr = String(data: errData, encoding: .utf8), !errStr.isEmpty {
+                        let preview = String(errStr.prefix(200))
+                        Task { @MainActor in
+                            self.statusMessage = "⚠️ Stderr: \(preview)"
+                        }
+                    }
+                }
                 
                 await MainActor.run {
                     self.statusMessage = "✅ Antigravity launched with proxy on port \(port)!"
