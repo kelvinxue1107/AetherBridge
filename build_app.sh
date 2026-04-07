@@ -1,8 +1,10 @@
 #!/bin/bash
-echo "Building proxychains-ng..."
+set -e
+
+echo "=== Step 1: Building proxychains-ng ==="
 export MACOSX_DEPLOYMENT_TARGET=13.0
 
-if [ ! -f "proxychains-ng/libproxychains4.dylib" ]; then
+if [ ! -f "proxychains-ng/libproxychains4.dylib" ] || [ ! -f "proxychains-ng/proxychains4" ]; then
     echo "Downloading and compiling proxychains-ng..."
     rm -rf proxychains-ng
     git clone https://github.com/rofl0r/proxychains-ng.git
@@ -12,18 +14,21 @@ if [ ! -f "proxychains-ng/libproxychains4.dylib" ]; then
     cd ..
 fi
 
-echo "Building AetherBridge..."
+echo "=== Step 2: Building AetherBridge Swift binary ==="
 swift build -c release
 
-echo "Creating macOS App Bundle..."
+echo "=== Step 3: Creating macOS App Bundle ==="
+rm -rf AetherBridge.app
 mkdir -p AetherBridge.app/Contents/MacOS
 mkdir -p AetherBridge.app/Contents/Resources
 
 # Copy the Swift binary
 cp .build/apple/Products/Release/AetherBridge AetherBridge.app/Contents/MacOS/ 2>/dev/null || cp .build/release/AetherBridge AetherBridge.app/Contents/MacOS/
 
-# Copy the pre-compiled proxychains library
+# Copy BOTH proxychains artifacts
 cp proxychains-ng/libproxychains4.dylib AetherBridge.app/Contents/Resources/
+cp proxychains-ng/proxychains4 AetherBridge.app/Contents/Resources/
+chmod +x AetherBridge.app/Contents/Resources/proxychains4
 
 if [ -f "AppIcon.icns" ]; then
     cp AppIcon.icns AetherBridge.app/Contents/Resources/
@@ -45,9 +50,9 @@ cat <<EOF > AetherBridge.app/Contents/Info.plist
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>3.0</string>
+    <string>4.0</string>
     <key>CFBundleVersion</key>
-    <string>3</string>
+    <string>4</string>
     <!-- Hide the dock icon -->
     <key>LSUIElement</key>
     <true/>
@@ -55,4 +60,7 @@ cat <<EOF > AetherBridge.app/Contents/Info.plist
 </plist>
 EOF
 
-echo "Done! You can now run AetherBridge.app"
+echo "=== Verifying bundle contents ==="
+ls -la AetherBridge.app/Contents/Resources/
+echo ""
+echo "Done! AetherBridge.app is ready."

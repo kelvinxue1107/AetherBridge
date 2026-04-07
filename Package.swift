@@ -10,7 +10,8 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "AetherBridge"
+            name: "AetherBridge",
+            swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]
 )
