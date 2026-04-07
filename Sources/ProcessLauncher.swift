@@ -77,9 +77,9 @@ class ProcessLauncher: ObservableObject {
                 let confContent = """
                 strict_chain
                 proxy_dns
-                remote_dns_subnet 224
-                tcp_read_time_out 15000
-                tcp_connect_time_out 8000
+                remote_dns_subnet 198
+                tcp_read_time_out 1500000
+                tcp_connect_time_out 15000
                 quiet_mode
                 [ProxyList]
                 socks5 127.0.0.1 \(self.proxyPort)
