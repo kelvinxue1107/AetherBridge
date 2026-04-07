@@ -59,11 +59,14 @@ class ProcessLauncher: ObservableObject {
                     DispatchQueue.main.async { self.statusMessage = "Cloning IDE..." }
                     try fm.copyItem(atPath: sourcePath, toPath: destApp.path)
                     
-                    DispatchQueue.main.async { self.statusMessage = "Stripping signatures..." }
-                    // Strip the signature
+                    DispatchQueue.main.async { self.statusMessage = "Deep-Stripping signatures (takes ~10s)..." }
+                    // Deep strip the signature across all helpers, node modules, and binaries
                     let stripTask = Process()
-                    stripTask.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
-                    stripTask.arguments = ["--remove-signature", destApp.path]
+                    stripTask.executableURL = URL(fileURLWithPath: "/bin/bash")
+                    stripTask.arguments = [
+                        "-c",
+                        "find '\(destApp.path)' -type f \\( -name \"*.dylib\" -o -name \"*.node\" -o -perm -0111 \\) -exec codesign --remove-signature {} 2>/dev/null \\; || true"
+                    ]
                     try stripTask.run()
                     stripTask.waitUntilExit()
                 }
