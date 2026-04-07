@@ -22,43 +22,32 @@ class ProcessLauncher: ObservableObject {
         self.isLaunching = true
         self.statusMessage = "Launching..."
         
-        DispatchQueue.global(qos: .userInitiated).async {
-            // Find Antigravity IDE
-            let appURL = URL(fileURLWithPath: "/Applications/Antigravity.app") // Standard location
-            
-            // We must launch the raw executable to inject environment variables effectively
-            let executableURL = appURL.appendingPathComponent("Contents/MacOS/Antigravity")
-            
-            if !FileManager.default.fileExists(atPath: executableURL.path) {
-                DispatchQueue.main.async {
-                    self.statusMessage = "❌ Antigravity not found at /Applications/"
-                    self.isLaunching = false
-                }
-                return
+        let appURL = URL(fileURLWithPath: "/Applications/Antigravity.app")
+        
+        if !FileManager.default.fileExists(atPath: appURL.path) {
+            DispatchQueue.main.async {
+                self.statusMessage = "❌ Antigravity not found at /Applications/"
+                self.isLaunching = false
             }
-            
-            let process = Process()
-            process.executableURL = executableURL
-            
-            // Inject the proxy variables targeting local VLESS node
-            var env = ProcessInfo.processInfo.environment
-            env["HTTP_PROXY"] = "http://127.0.0.1:\(self.proxyPort)"
-            env["HTTPS_PROXY"] = "http://127.0.0.1:\(self.proxyPort)"
-            env["ALL_PROXY"] = "socks5://127.0.0.1:\(self.proxyPort)"
-            env["NO_PROXY"] = "localhost,127.0.0.1"
-            process.environment = env
-            
-            do {
-                try process.run()
-                DispatchQueue.main.async {
-                    self.statusMessage = "✅ Launched securely!"
-                    self.isLaunching = false
-                }
-            } catch {
-                DispatchQueue.main.async {
+            return
+        }
+        
+        let config = NSWorkspace.OpenConfiguration()
+        var env = ProcessInfo.processInfo.environment
+        env["HTTP_PROXY"] = "http://127.0.0.1:\(self.proxyPort)"
+        env["HTTPS_PROXY"] = "http://127.0.0.1:\(self.proxyPort)"
+        env["ALL_PROXY"] = "socks5://127.0.0.1:\(self.proxyPort)"
+        env["NO_PROXY"] = "localhost,127.0.0.1,::1"
+        config.environment = env
+        
+        NSWorkspace.shared.openApplication(at: appURL, configuration: config) { app, error in
+            DispatchQueue.main.async {
+                if let error = error {
                     self.statusMessage = "❌ Error: \(error.localizedDescription)"
-                    self.isLaunching = false
+                } else {
+                    self.statusMessage = "✅ Launched securely via NSWorkspace!"
                 }
+                self.isLaunching = false
             }
         }
     }
